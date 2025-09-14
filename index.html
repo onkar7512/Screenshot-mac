@@ -7,7 +7,7 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     body { font-family: "Segoe UI", sans-serif; background:#f9fafb; margin:0; padding:0; }
-    header { background:#2563eb; color:white; padding:15px; text-align:center; font-size:20px; font-weight:bold; position:relative; }
+    header { background:#2563eb; color:white; padding:15px; text-align:center; font-size:20px; font-weight:bold; }
     .watermark {
       position: fixed;
       bottom: 15px;
@@ -80,14 +80,22 @@ let editIndex = null;
 // Regex for MAC
 const macRegex = /\b([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})\b/g;
 
+// Create reusable Tesseract worker (faster than new each time)
+const worker = Tesseract.createWorker("eng", 1, {
+  logger: m => console.log(m) // debug progress
+});
+
 document.getElementById("fileInput").addEventListener("change", handleFile);
 
 async function handleFile(e) {
   const file = e.target.files[0];
   if (!file) return;
-  document.getElementById("loading").textContent = "Scanning image for MAC address...";
+  document.getElementById("loading").textContent = "Fast scanning...";
   try {
-    const result = await Tesseract.recognize(file, "eng");
+    const img = await resizeImage(file, 1000); // reduce size
+    const result = await worker.then(w =>
+      w.recognize(img, { tessedit_char_whitelist: "0123456789ABCDEFabcdef:-" })
+    );
     const text = result.data.text;
     const macs = text.match(macRegex);
     if (macs && macs.length > 0) {
@@ -97,10 +105,35 @@ async function handleFile(e) {
       document.getElementById("loading").textContent = "No MAC found, type manually.";
     }
   } catch (err) {
+    console.error(err);
     document.getElementById("loading").textContent = "Error processing image.";
   }
 }
 
+// Resize image before OCR for speed
+function resizeImage(file, maxWidth) {
+  return new Promise(resolve => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = e => {
+      img.src = e.target.result;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const scale = maxWidth / img.width;
+        const w = img.width > maxWidth ? maxWidth : img.width;
+        const h = img.width > maxWidth ? img.height * scale : img.height;
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.8));
+      };
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// Format MAC address (AA:BB:CC:DD:EE:FF)
 function formatMac(mac) {
   mac = mac.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
   return mac.match(/.{1,2}/g)?.join(":") || mac;
