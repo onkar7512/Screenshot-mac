@@ -75,13 +75,24 @@
       font-weight: bold;
       margin-top: 10px;
     }
+    video {
+      width: 100%;
+      border-radius: 10px;
+      margin-top: 10px;
+      display: none;
+    }
   </style>
 </head>
 <body>
   <header>MAC Address Extractor</header>
   <div class="container">
     <input type="text" id="personName" placeholder="Enter Person Name">
-    <input type="file" id="screenshotInput" accept="image/*" capture="environment">
+
+    <input type="file" id="screenshotInput" accept="image/*">
+    <button onclick="openCamera()">📷 Open Camera</button>
+    <video id="camera" autoplay playsinline></video>
+    <button id="captureBtn" style="display:none;" onclick="captureAndScan()">📸 Capture & Scan</button>
+
     <input type="text" id="macTextInput" placeholder="Or type MAC address manually">
     <button onclick="addData()">Add Entry</button>
     <button onclick="downloadExcel()">Download Excel</button>
@@ -106,24 +117,56 @@
   <script>
     let tableData = [];
     const macRegex = /([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})/g;
-    let worker;
+    let worker, cameraStream;
 
     // Init worker once
     (async () => {
       worker = await Tesseract.createWorker("eng", 1);
     })();
 
-    // Handle file input
+    // File upload OCR
     document.getElementById("screenshotInput").addEventListener("change", async (e) => {
       const file = e.target.files[0];
       if (!file) return;
       document.getElementById("loading").textContent = "Scanning screenshot...";
 
-      const resizedImg = await resizeImage(file, 800); // resize to speed up
-      const result = await worker.recognize(resizedImg, {
+      const resizedImg = await resizeImage(file, 800);
+      scanImage(resizedImg);
+    });
+
+    // Open camera
+    async function openCamera() {
+      try {
+        const video = document.getElementById("camera");
+        const captureBtn = document.getElementById("captureBtn");
+        video.style.display = "block";
+        captureBtn.style.display = "block";
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        video.srcObject = cameraStream;
+      } catch (err) {
+        alert("Camera access denied or not available.");
+      }
+    }
+
+    // Capture photo and OCR
+    async function captureAndScan() {
+      const video = document.getElementById("camera");
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0);
+      const imgData = canvas.toDataURL("image/jpeg", 0.8);
+
+      document.getElementById("loading").textContent = "Scanning camera capture...";
+      scanImage(imgData);
+    }
+
+    // Run OCR
+    async function scanImage(img) {
+      const result = await worker.recognize(img, {
         tessedit_char_whitelist: "0123456789ABCDEFabcdef:-"
       });
-
       const text = result.data.text;
       const macs = text.match(macRegex);
       if (macs && macs.length > 0) {
@@ -132,9 +175,9 @@
       } else {
         document.getElementById("loading").textContent = "No MAC found. Type manually.";
       }
-    });
+    }
 
-    // Resize image before OCR
+    // Resize image for faster OCR
     function resizeImage(file, maxWidth) {
       return new Promise(resolve => {
         const img = new Image();
