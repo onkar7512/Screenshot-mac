@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MAC Address Collector</title>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: "Segoe UI", sans-serif; background:#f9fafb; margin:0; padding:0; }
+    header { background:#2563eb; color:white; padding:15px; text-align:center; font-size:20px; font-weight:bold; position:relative; }
+    .watermark {
+      position: fixed;
+      bottom: 15px;
+      right: 15px;
+      font-size: 14px;
+      font-weight: bold;
+      color: #2563eb;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 6px 12px;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+      z-index: 9999;
+      user-select: none;
+      pointer-events: none;
+    }
+    .container { max-width:600px; margin:20px auto; background:#fff; padding:20px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.1); }
+    label { display:block; text-align:left; margin:10px 0 5px; font-weight:600; }
+    input, textarea, button { width:100%; padding:10px; margin-bottom:12px; border:1px solid #d1d5db; border-radius:8px; font-size:15px; }
+    input:focus, textarea:focus { outline:none; border-color:#2563eb; }
+    button { background:#2563eb; color:white; font-weight:bold; cursor:pointer; }
+    button:hover { background:#1d4ed8; }
+    .actions { display:flex; gap:10px; flex-wrap:wrap; }
+    table { width:100%; border-collapse:collapse; margin-top:20px; }
+    th, td { border:1px solid #e5e7eb; padding:8px; text-align:center; }
+    th { background:#f1f5f9; }
+    .btn-small { padding:5px 8px; font-size:13px; margin:2px; border-radius:6px; color:white; border:none; cursor:pointer; }
+    .edit { background:#10b981; }
+    .edit:hover { background:#059669; }
+    .delete { background:#ef4444; }
+    .delete:hover { background:#dc2626; }
+    .loading { color:#6b7280; font-size:14px; margin-bottom:10px; }
+  </style>
+</head>
+<body>
+  <header>MAC Address Collector</header>
+  <div class="container">
+    <label>Person Name</label>
+    <input type="text" id="personName" placeholder="Enter person name">
+
+    <label>Option 1: Upload Screenshot (Detect MAC)</label>
+    <input type="file" id="fileInput" accept="image/*" capture="environment">
+    
+    <label>Option 2: Enter MAC Address Manually</label>
+    <textarea id="macTextInput" placeholder="Paste or type MAC address here"></textarea>
+
+    <div class="loading" id="loading"></div>
+    <button onclick="addEntry()">Add Entry</button>
+
+    <div class="actions">
+      <button onclick="downloadExcel()">Download Excel</button>
+    </div>
+
+    <table id="dataTable">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>MAC Address</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div class="watermark">Made by Onkar Gavde</div>
+
+<script>
+let entries = [];
+let editIndex = null;
+
+// Regex for MAC
+const macRegex = /\b([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})\b/g;
+
+document.getElementById("fileInput").addEventListener("change", handleFile);
+
+async function handleFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById("loading").textContent = "Scanning image for MAC address...";
+  try {
+    const result = await Tesseract.recognize(file, "eng");
+    const text = result.data.text;
+    const macs = text.match(macRegex);
+    if (macs && macs.length > 0) {
+      document.getElementById("macTextInput").value = macs[0].toUpperCase();
+      document.getElementById("loading").textContent = "MAC detected!";
+    } else {
+      document.getElementById("loading").textContent = "No MAC found, type manually.";
+    }
+  } catch (err) {
+    document.getElementById("loading").textContent = "Error processing image.";
+  }
+}
+
+function formatMac(mac) {
+  mac = mac.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
+  return mac.match(/.{1,2}/g)?.join(":") || mac;
+}
+
+function addEntry() {
+  const name = document.getElementById("personName").value.trim();
+  let mac = document.getElementById("macTextInput").value.trim();
+
+  if (!name || !mac) { alert("Please enter both Name and MAC."); return; }
+
+  mac = formatMac(mac);
+
+  if (editIndex !== null) {
+    entries[editIndex] = { name, mac };
+    editIndex = null;
+  } else {
+    entries.push({ name, mac });
+  }
+  renderTable();
+  clearInputs();
+}
+
+function renderTable() {
+  const tbody = document.querySelector("#dataTable tbody");
+  tbody.innerHTML = "";
+  entries.forEach((entry, i) => {
+    const row = `<tr>
+      <td>${entry.name}</td>
+      <td>${entry.mac}</td>
+      <td>
+        <button class="btn-small edit" onclick="editEntry(${i})">Edit</button>
+        <button class="btn-small delete" onclick="deleteEntry(${i})">Delete</button>
+      </td>
+    </tr>`;
+    tbody.innerHTML += row;
+  });
+}
+
+function editEntry(i) {
+  document.getElementById("personName").value = entries[i].name;
+  document.getElementById("macTextInput").value = entries[i].mac;
+  editIndex = i;
+}
+
+function deleteEntry(i) {
+  entries.splice(i, 1);
+  renderTable();
+}
+
+function clearInputs() {
+  document.getElementById("personName").value = "";
+  document.getElementById("macTextInput").value = "";
+  document.getElementById("fileInput").value = "";
+  document.getElementById("loading").textContent = "";
+}
+
+function downloadExcel() {
+  if (entries.length === 0) { alert("No data to export."); return; }
+  const ws = XLSX.utils.json_to_sheet(entries);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "MAC_Data");
+  XLSX.writeFile(wb, "mac_data.xlsx");
+}
+</script>
+</body>
+</html>
