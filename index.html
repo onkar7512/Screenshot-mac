@@ -2,12 +2,59 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>MAC Address Collector</title>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <title>MAC Address Extractor</title>
   <style>
-    body { font-family: "Segoe UI", sans-serif; background:#f9fafb; margin:0; padding:0; }
-    header { background:#2563eb; color:white; padding:15px; text-align:center; font-size:20px; font-weight:bold; }
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f9;
+      margin: 0;
+      padding: 0;
+      text-align: center;
+    }
+    header {
+      background: #2563eb;
+      color: white;
+      padding: 15px;
+      font-size: 20px;
+      font-weight: bold;
+    }
+    .container {
+      padding: 20px;
+      max-width: 500px;
+      margin: auto;
+    }
+    input, button {
+      margin: 8px 0;
+      padding: 10px;
+      width: 100%;
+      font-size: 16px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #1e40af;
+    }
+    table {
+      width: 100%;
+      margin-top: 20px;
+      border-collapse: collapse;
+      background: white;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 10px;
+    }
+    th {
+      background: #2563eb;
+      color: white;
+    }
     .watermark {
       position: fixed;
       bottom: 15px;
@@ -15,189 +62,164 @@
       font-size: 14px;
       font-weight: bold;
       color: #2563eb;
-      background: rgba(255, 255, 255, 0.95);
+      background: rgba(255,255,255,0.95);
       padding: 6px 12px;
       border-radius: 8px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
       z-index: 9999;
       user-select: none;
       pointer-events: none;
     }
-    .container { max-width:600px; margin:20px auto; background:#fff; padding:20px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.1); }
-    label { display:block; text-align:left; margin:10px 0 5px; font-weight:600; }
-    input, textarea, button { width:100%; padding:10px; margin-bottom:12px; border:1px solid #d1d5db; border-radius:8px; font-size:15px; }
-    input:focus, textarea:focus { outline:none; border-color:#2563eb; }
-    button { background:#2563eb; color:white; font-weight:bold; cursor:pointer; }
-    button:hover { background:#1d4ed8; }
-    .actions { display:flex; gap:10px; flex-wrap:wrap; }
-    table { width:100%; border-collapse:collapse; margin-top:20px; }
-    th, td { border:1px solid #e5e7eb; padding:8px; text-align:center; }
-    th { background:#f1f5f9; }
-    .btn-small { padding:5px 8px; font-size:13px; margin:2px; border-radius:6px; color:white; border:none; cursor:pointer; }
-    .edit { background:#10b981; }
-    .edit:hover { background:#059669; }
-    .delete { background:#ef4444; }
-    .delete:hover { background:#dc2626; }
-    .loading { color:#6b7280; font-size:14px; margin-bottom:10px; }
+    #loading {
+      color: #dc2626;
+      font-weight: bold;
+      margin-top: 10px;
+    }
   </style>
 </head>
 <body>
-  <header>MAC Address Collector</header>
+  <header>MAC Address Extractor</header>
   <div class="container">
-    <label>Person Name</label>
-    <input type="text" id="personName" placeholder="Enter person name">
-
-    <label>Option 1: Upload Screenshot (Detect MAC)</label>
-    <input type="file" id="fileInput" accept="image/*" capture="environment">
-    
-    <label>Option 2: Enter MAC Address Manually</label>
-    <textarea id="macTextInput" placeholder="Paste or type MAC address here"></textarea>
-
-    <div class="loading" id="loading"></div>
-    <button onclick="addEntry()">Add Entry</button>
-
-    <div class="actions">
-      <button onclick="downloadExcel()">Download Excel</button>
-    </div>
+    <input type="text" id="personName" placeholder="Enter Person Name">
+    <input type="file" id="screenshotInput" accept="image/*" capture="environment">
+    <input type="text" id="macTextInput" placeholder="Or type MAC address manually">
+    <button onclick="addData()">Add Entry</button>
+    <button onclick="downloadExcel()">Download Excel</button>
+    <p id="loading"></p>
 
     <table id="dataTable">
       <thead>
         <tr>
-          <th>Name</th>
+          <th>Person Name</th>
           <th>MAC Address</th>
-          <th>Actions</th>
+          <th>Action</th>
         </tr>
       </thead>
       <tbody></tbody>
     </table>
   </div>
+
   <div class="watermark">Made by Onkar Gavde</div>
 
-<script>
-let entries = [];
-let editIndex = null;
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script>
+    let tableData = [];
+    const macRegex = /([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})/g;
+    let worker;
 
-// Regex for MAC
-const macRegex = /\b([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})\b/g;
+    // Init worker once
+    (async () => {
+      worker = await Tesseract.createWorker("eng", 1);
+    })();
 
-// Create reusable Tesseract worker (faster than new each time)
-const worker = Tesseract.createWorker("eng", 1, {
-  logger: m => console.log(m) // debug progress
-});
+    // Handle file input
+    document.getElementById("screenshotInput").addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      document.getElementById("loading").textContent = "Scanning screenshot...";
 
-document.getElementById("fileInput").addEventListener("change", handleFile);
+      const resizedImg = await resizeImage(file, 800); // resize to speed up
+      const result = await worker.recognize(resizedImg, {
+        tessedit_char_whitelist: "0123456789ABCDEFabcdef:-"
+      });
 
-async function handleFile(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  document.getElementById("loading").textContent = "Fast scanning...";
-  try {
-    const img = await resizeImage(file, 1000); // reduce size
-    const result = await worker.then(w =>
-      w.recognize(img, { tessedit_char_whitelist: "0123456789ABCDEFabcdef:-" })
-    );
-    const text = result.data.text;
-    const macs = text.match(macRegex);
-    if (macs && macs.length > 0) {
-      document.getElementById("macTextInput").value = macs[0].toUpperCase();
-      document.getElementById("loading").textContent = "MAC detected!";
-    } else {
-      document.getElementById("loading").textContent = "No MAC found, type manually.";
+      const text = result.data.text;
+      const macs = text.match(macRegex);
+      if (macs && macs.length > 0) {
+        document.getElementById("macTextInput").value = macs[0].toUpperCase();
+        document.getElementById("loading").textContent = "MAC detected!";
+      } else {
+        document.getElementById("loading").textContent = "No MAC found. Type manually.";
+      }
+    });
+
+    // Resize image before OCR
+    function resizeImage(file, maxWidth) {
+      return new Promise(resolve => {
+        const img = new Image();
+        const reader = new FileReader();
+        reader.onload = e => {
+          img.src = e.target.result;
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            const scale = maxWidth / img.width;
+            const w = img.width > maxWidth ? maxWidth : img.width;
+            const h = img.width > maxWidth ? img.height * scale : img.height;
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL("image/jpeg", 0.8));
+          };
+        };
+        reader.readAsDataURL(file);
+      });
     }
-  } catch (err) {
-    console.error(err);
-    document.getElementById("loading").textContent = "Error processing image.";
-  }
-}
 
-// Resize image before OCR for speed
-function resizeImage(file, maxWidth) {
-  return new Promise(resolve => {
-    const img = new Image();
-    const reader = new FileReader();
-    reader.onload = e => {
-      img.src = e.target.result;
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const scale = maxWidth / img.width;
-        const w = img.width > maxWidth ? maxWidth : img.width;
-        const h = img.width > maxWidth ? img.height * scale : img.height;
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL("image/jpeg", 0.8));
-      };
-    };
-    reader.readAsDataURL(file);
-  });
-}
+    // Add row
+    function addData() {
+      const name = document.getElementById("personName").value.trim();
+      let mac = document.getElementById("macTextInput").value.trim();
+      if (!name || !mac) {
+        alert("Enter both name and MAC address.");
+        return;
+      }
+      mac = formatMac(mac);
+      tableData.push({ name, mac });
+      renderTable();
+      document.getElementById("personName").value = "";
+      document.getElementById("macTextInput").value = "";
+    }
 
-// Format MAC address (AA:BB:CC:DD:EE:FF)
-function formatMac(mac) {
-  mac = mac.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
-  return mac.match(/.{1,2}/g)?.join(":") || mac;
-}
+    // Format MAC
+    function formatMac(mac) {
+      return mac.replace(/[^0-9A-Fa-f]/g, "")
+        .match(/.{1,2}/g)
+        .join(":")
+        .toUpperCase();
+    }
 
-function addEntry() {
-  const name = document.getElementById("personName").value.trim();
-  let mac = document.getElementById("macTextInput").value.trim();
+    // Render table
+    function renderTable() {
+      const tbody = document.querySelector("#dataTable tbody");
+      tbody.innerHTML = "";
+      tableData.forEach((row, i) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${row.name}</td>
+          <td>${row.mac}</td>
+          <td>
+            <button onclick="editRow(${i})">Edit</button>
+            <button onclick="deleteRow(${i})">Delete</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
 
-  if (!name || !mac) { alert("Please enter both Name and MAC."); return; }
+    // Edit row
+    function editRow(i) {
+      const row = tableData[i];
+      document.getElementById("personName").value = row.name;
+      document.getElementById("macTextInput").value = row.mac;
+      tableData.splice(i, 1);
+      renderTable();
+    }
 
-  mac = formatMac(mac);
+    // Delete row
+    function deleteRow(i) {
+      tableData.splice(i, 1);
+      renderTable();
+    }
 
-  if (editIndex !== null) {
-    entries[editIndex] = { name, mac };
-    editIndex = null;
-  } else {
-    entries.push({ name, mac });
-  }
-  renderTable();
-  clearInputs();
-}
-
-function renderTable() {
-  const tbody = document.querySelector("#dataTable tbody");
-  tbody.innerHTML = "";
-  entries.forEach((entry, i) => {
-    const row = `<tr>
-      <td>${entry.name}</td>
-      <td>${entry.mac}</td>
-      <td>
-        <button class="btn-small edit" onclick="editEntry(${i})">Edit</button>
-        <button class="btn-small delete" onclick="deleteEntry(${i})">Delete</button>
-      </td>
-    </tr>`;
-    tbody.innerHTML += row;
-  });
-}
-
-function editEntry(i) {
-  document.getElementById("personName").value = entries[i].name;
-  document.getElementById("macTextInput").value = entries[i].mac;
-  editIndex = i;
-}
-
-function deleteEntry(i) {
-  entries.splice(i, 1);
-  renderTable();
-}
-
-function clearInputs() {
-  document.getElementById("personName").value = "";
-  document.getElementById("macTextInput").value = "";
-  document.getElementById("fileInput").value = "";
-  document.getElementById("loading").textContent = "";
-}
-
-function downloadExcel() {
-  if (entries.length === 0) { alert("No data to export."); return; }
-  const ws = XLSX.utils.json_to_sheet(entries);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "MAC_Data");
-  XLSX.writeFile(wb, "mac_data.xlsx");
-}
-</script>
+    // Download Excel
+    function downloadExcel() {
+      const ws = XLSX.utils.json_to_sheet(tableData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "MAC Data");
+      XLSX.writeFile(wb, "mac_data.xlsx");
+    }
+  </script>
 </body>
 </html>
